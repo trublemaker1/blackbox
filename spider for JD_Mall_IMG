@@ -1,0 +1,89 @@
+from retrying import retry
+from lxml import etree
+import requests
+import re
+import os
+
+
+class Spider(object):
+    def __init__(self):
+        self.headers = {
+            '''模拟浏览器，防反爬，同理可以加上refer与cookie'''
+            "User_Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36"
+        }
+
+    '''尝试五次'''
+    @retry(stop_max_attempt_number=5)
+    def _parse_url(self, url):
+        try:
+            response = requests.get(url, headers=self.headers).content.decode()
+
+        except:
+            return ""
+        else:
+            return response
+
+    def parse_url(self, url, obj):
+        response = self._parse_url(url)
+        ''' etree 对象才能使用xpath '''
+        html = etree.HTML(response)
+        ''' 拿到li标签集合 每个li标签中都包含所需数据'''
+        li_list = html.xpath('//ul[@class="gl-warp clearfix"]/li')
+        # print(li_list)
+        for li in li_list:
+            ''' "https:" + '''
+            detail_url = ''.join(li.xpath('.//div[@class="gl-i-wrap"]/div[1]/a/@href'))
+            '''  以https:开头的url无用，去掉 '''
+            if not detail_url.startswith("http"):
+                detail_url = "https:" + detail_url
+                ret = requests.get(detail_url).text
+                print(">>>", type(ret))
+
+            ''' url 为js加载，用regex获取  '''
+            try:
+                '''捕获异常，当正则表达式没有获取到对象时，为了让程序正常运行'''
+                res = re.findall(r"imageList\:(.*?jpg\"\])", ret)[0]
+
+                ''' 字符串嵌套列表 处理成列表，再遍历 '''
+                imageList = res.replace('[', '').replace(']', '').replace('"', '').split(',')
+                for image in imageList:
+                    ''' 图片的url的最后部分作为文件名 '''
+                    image_title = image.split('/')[-1]  # 取列表最后一项
+                    if image.startswith(" "):
+                        ''' 拼接的时候去掉字符串开始的空格 '''
+                        image = image.lstrip()
+                    '''  拼接成完整img_url '''
+                    fullImageUrl = "https://img11.360buyimg.com/n1/" + image
+                    # print(fullImageUrl)
+                    print(image_title)
+                    self.save_img(fullImageUrl, image_title, obj)
+            except:
+                ''' 出现异常则打印，不阻止程序奔溃 '''
+                print('图片加载异常！')
+
+    def save_img(self, fullImageUrl, image_title, obj):
+
+        response = requests.get(fullImageUrl, headers=self.headers)
+        path = "E:/code/jd_img/{}/".format(obj)
+        if not os.path.exists(path):
+            os.mkdir(path)
+        print("图片下载中......")
+        open(path + image_title, "wb").write(response.content)
+
+    def run(self):
+
+        obj = input("请输入要下载图片名称：")
+        i = 1
+        while i < 15:
+            '''  
+            数据为js加载，next page url 不需要进parse url提取，手动拼接
+            只有前七页有效，公差为2的等差数列 
+            '''
+            url = 'https://search.jd.com/Search?keyword={}'.format(obj)+'&enc=utf-8&wq={}'.format(obj) + '/{}'.format(i)
+            i += 2
+            self.parse_url(url, obj)
+
+
+if __name__ == '__main__':
+    spider = Spider()
+    spider.run()
